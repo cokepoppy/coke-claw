@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Coke Claw Lite Control</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="background-grid" aria-hidden="true"></div>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Lite Control UI</p>
+          <h1>Coke Claw Admin</h1>
+        </div>
+        <div class="badges">
+          <span id="badge-auth" class="badge">Auth: checking...</span>
+          <span id="badge-uptime" class="badge">Uptime: --</span>
+          <button id="btn-refresh" class="button ghost" type="button">Refresh</button>
+        </div>
+      </header>
+
+      <section class="layout">
+        <article class="card">
+          <h2>Gateway Status</h2>
+          <div class="actions">
+            <button id="btn-auth-status" class="button ghost" type="button">Auth Status</button>
+            <button id="btn-auth-login" class="button ghost" type="button">Start Codex Login</button>
+          </div>
+          <dl class="kv" id="health-kv"></dl>
+          <pre id="auth-output" class="output">Auth panel ready.</pre>
+        </article>
+
+        <article class="card">
+          <h2>Coding Agent</h2>
+          <form id="coding-form" class="form-grid">
+            <label>
+              Session Key
+              <input id="coding-session" value="console:admin" />
+            </label>
+            <label>
+              Mode
+              <select id="coding-mode">
+                <option value="persistent">persistent</option>
+                <option value="oneshot">oneshot</option>
+              </select>
+            </label>
+            <label>
+              CWD (optional)
+              <input id="coding-cwd" placeholder="." />
+            </label>
+            <label class="checkbox">
+              <input id="coding-new" type="checkbox" />
+              Force new thread
+            </label>
+            <label class="wide">
+              Task
+              <textarea id="coding-task" rows="4" placeholder="Describe coding task..."></textarea>
+            </label>
+            <div class="actions wide">
+              <button class="button" type="submit">Run /coding_agent</button>
+              <button class="button ghost" id="btn-sessions" type="button">Sessions</button>
+              <button class="button ghost" id="btn-reset" type="button">Reset</button>
+            </div>
+          </form>
+          <pre id="coding-output" class="output">Ready.</pre>
+        </article>
+
+        <article class="card">
+          <h2>Persistent Sessions</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Session Key</th>
+                  <th>Thread ID</th>
+                  <th>CWD</th>
+                  <th>Updated</th>
+                </tr>
+              </thead>
+              <tbody id="sessions-body"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="card">
+          <h2>Debug Chat</h2>
+          <form id="chat-form" class="form-grid">
+            <label>
+              Session Key
+              <input id="chat-session" value="console:admin" />
+            </label>
+            <label class="wide">
+              Message
+              <textarea id="chat-text" rows="3" placeholder="Send message to router..."></textarea>
+            </label>
+            <div class="actions wide">
+              <button class="button" type="submit">Send</button>
+            </div>
+          </form>
+          <pre id="chat-output" class="output">No messages yet.</pre>
+        </article>
+      </section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
