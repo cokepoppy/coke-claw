@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import fsp from "node:fs/promises";
 
 export interface SpawnCodexParams {
   task: string;
@@ -13,6 +16,38 @@ interface CodexExecResult {
   text: string;
   stderr?: string;
   command: string;
+}
+
+function canExecute(filePath: string): boolean {
+  try {
+    fs.accessSync(filePath, fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function resolveCodexBin(): string {
+  const fromEnv = process.env.CODEX_BIN?.trim();
+  if (fromEnv) {
+    return fromEnv;
+  }
+
+  const home = process.env.HOME?.trim();
+  const candidates = [
+    home ? path.join(home, ".npm-global/bin/codex") : "",
+    home ? path.join(home, ".local/bin/codex") : "",
+    "/opt/homebrew/bin/codex",
+    "/usr/local/bin/codex",
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (path.isAbsolute(candidate) && canExecute(candidate)) {
+      return candidate;
+    }
+  }
+
+  return "codex";
 }
 
 function parseJsonLines(stdout: string): {
@@ -51,9 +86,14 @@ function parseJsonLines(stdout: string): {
 }
 
 async function runCodex(args: string[], cwd?: string): Promise<CodexExecResult> {
+  const resolvedCwd = cwd?.trim() ? path.resolve(cwd.trim()) : undefined;
+  if (resolvedCwd) {
+    await fsp.mkdir(resolvedCwd, { recursive: true });
+  }
+  const codexBin = resolveCodexBin();
   return await new Promise((resolve) => {
-    const child = spawn("codex", args, {
-      cwd,
+    const child = spawn(codexBin, args, {
+      cwd: resolvedCwd,
       stdio: ["ignore", "pipe", "pipe"],
       env: process.env,
     });
@@ -69,7 +109,7 @@ async function runCodex(args: string[], cwd?: string): Promise<CodexExecResult> 
       resolve({
         ok: false,
         text: "codex command timed out",
-        command: `codex ${args.join(" ")}`,
+        command: `${codexBin} ${args.join(" ")}`,
       });
     }, 5 * 60 * 1000);
 
@@ -85,37 +125,53 @@ async function runCodex(args: string[], cwd?: string): Promise<CodexExecResult> 
         threadId: parsed.threadId,
         text: fallbackText,
         stderr,
-        command: `codex ${args.join(" ")}`,
+        command: `${codexBin} ${args.join(" ")}`,
       });
     });
 
     child.on("error", (error) => {
       clearTimeout(timer);
+      const extra =
+        error && typeof error === "object" && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT"
+          ? `\nHint: codex binary not found. Set CODEX_BIN to the absolute path (e.g. ${process.env.HOME ?? "~"}/.npm-global/bin/codex).`
+          : "";
       resolve({
         ok: false,
-        text: error.message,
-        command: `codex ${args.join(" ")}`,
+        text: `${error.message}${extra}`,
+        command: `${codexBin} ${args.join(" ")}`,
       });
     });
   });
 }
 
-function buildNewArgs(task: string): string[] {
-  const modelFromEnv = process.env.CODEX_MODEL;
-  const args = ["exec", "--skip-git-repo-check", "--json"];
+function appendCommonOptions(args: string[], cwd?: string): string[] {
+  const sandbox = (process.env.CODEX_SANDBOX ?? "danger-full-access").trim();
+  if (sandbox === "read-only" || sandbox === "workspace-write" || sandbox === "danger-full-access") {
+    args.push("--sandbox", sandbox);
+  }
+
+  const modelFromEnv = process.env.CODEX_MODEL?.trim();
   if (modelFromEnv) {
     args.push("--model", modelFromEnv);
   }
+
+  const cwdFromArg = cwd?.trim();
+  if (cwdFromArg) {
+    args.push("--cd", cwdFromArg);
+  }
+  return args;
+}
+
+function buildNewArgs(task: string, cwd?: string): string[] {
+  const args = ["exec", "--skip-git-repo-check", "--json"];
+  appendCommonOptions(args, cwd);
   args.push(task);
   return args;
 }
 
-function buildResumeArgs(threadId: string, task: string): string[] {
-  const modelFromEnv = process.env.CODEX_MODEL;
+function buildResumeArgs(threadId: string, task: string, cwd?: string): string[] {
   const args = ["exec", "resume", "--skip-git-repo-check", "--json", threadId];
-  if (modelFromEnv) {
-    args.push("--model", modelFromEnv);
-  }
+  appendCommonOptions(args, cwd);
   args.push(task);
   return args;
 }
@@ -129,7 +185,7 @@ export async function spawnCodexTask(
   }
 
   if (params.mode === "persistent" && params.threadId) {
-    const resumed = await runCodex(buildResumeArgs(params.threadId, task), params.cwd);
+    const resumed = await runCodex(buildResumeArgs(params.threadId, task, params.cwd), params.cwd);
     if (resumed.ok) {
       return {
         text: resumed.text,
@@ -139,7 +195,7 @@ export async function spawnCodexTask(
     }
 
     const reason = [resumed.text, resumed.stderr].filter(Boolean).join("\n");
-    const created = await runCodex(buildNewArgs(task), params.cwd);
+    const created = await runCodex(buildNewArgs(task, params.cwd), params.cwd);
     if (created.ok) {
       return {
         text: `Previous thread resume failed and a new thread was created.\nReason: ${reason}\n\n${created.text}`,
@@ -157,7 +213,7 @@ export async function spawnCodexTask(
     };
   }
 
-  const created = await runCodex(buildNewArgs(task), params.cwd);
+  const created = await runCodex(buildNewArgs(task, params.cwd), params.cwd);
   if (created.ok) {
     return {
       text: created.text,

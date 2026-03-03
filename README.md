@@ -37,7 +37,7 @@
    - `fs_search_files`（搜索文件）
    - `fs_create_file`（创建文件）
    - `fs_read_text` / `fs_write_text` / `fs_edit_text`
-   - `mac_run`（在 workspace 内执行终端命令）
+   - `mac_run`（可在任意 macOS 路径执行终端命令）
 
 ## 快速开始
 
@@ -65,6 +65,9 @@ WORKSPACE_ROOT=~/.cokeclaw
 ```env
 MODEL_REF=openai-codex/gpt-5.3-codex
 CODEX_LOGIN_MODE=auto
+CODEX_SANDBOX=danger-full-access
+# 可选：当服务环境 PATH 找不到 codex 时，填绝对路径
+CODEX_BIN=/Users/你的用户名/.npm-global/bin/codex
 ADMIN_HOST=127.0.0.1
 ADMIN_PORT=3187
 ```
