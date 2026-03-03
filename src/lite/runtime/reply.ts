@@ -1,6 +1,13 @@
-import OpenAI from "openai";
+import {
+  completeSimple,
+  type Api,
+  type AssistantMessage,
+  type CacheRetention,
+  type Model,
+  type ToolCall,
+} from "@mariozechner/pi-ai";
 import { LiteConfig } from "../config.js";
-import { createOpenAIClient } from "../auth/openai-client.js";
+import { resolveModelAuth } from "../auth/openai-client.js";
 import { createToolRuntime, type ToolDefinition } from "../tools/index.js";
 import { ChatMemoryStore } from "./chat-memory.js";
 
@@ -12,127 +19,183 @@ export interface ReplyResult {
   };
 }
 
-function safeParseJson(raw: string): Record<string, unknown> {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed && typeof parsed === "object") {
-      return parsed as Record<string, unknown>;
-    }
-  } catch {
-    // fall through
-  }
-  return {};
-}
-
-function extractText(response: any): string {
-  if (typeof response?.output_text === "string" && response.output_text.length > 0) {
-    return response.output_text;
-  }
-
-  const output = Array.isArray(response?.output) ? response.output : [];
+function extractText(response: AssistantMessage): string {
   const chunks: string[] = [];
-
-  for (const item of output) {
-    if (item?.type !== "message") {
-      continue;
-    }
-    const content = Array.isArray(item.content) ? item.content : [];
-    for (const part of content) {
-      if (part?.type === "output_text" && typeof part.text === "string") {
-        chunks.push(part.text);
-      }
-      if (part?.type === "text" && typeof part.text === "string") {
-        chunks.push(part.text);
-      }
+  for (const part of response.content) {
+    if (part.type === "text") {
+      chunks.push(part.text);
     }
   }
-
   return chunks.join("\n").trim();
 }
 
-function extractFunctionCalls(response: any): Array<{ callId: string; name: string; arguments: string }> {
-  const output = Array.isArray(response?.output) ? response.output : [];
-  const calls: Array<{ callId: string; name: string; arguments: string }> = [];
-
-  for (const item of output) {
-    if (item?.type !== "function_call") {
-      continue;
-    }
-
-    const callId = typeof item.call_id === "string" ? item.call_id : "";
-    const name = typeof item.name === "string" ? item.name : "";
-    const args = typeof item.arguments === "string" ? item.arguments : "{}";
-    if (!callId || !name) {
-      continue;
-    }
-    calls.push({ callId, name, arguments: args });
-  }
-
-  return calls;
+function extractToolCalls(response: AssistantMessage): ToolCall[] {
+  return response.content.filter((part): part is ToolCall => part.type === "toolCall");
 }
 
-async function createResponse(client: OpenAI, payload: Record<string, unknown>): Promise<any> {
-  return await client.responses.create(payload as any);
+function buildUsage() {
+  return {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      total: 0,
+    },
+  };
+}
+
+function historyToPiMessages(history: Array<{ role: "user" | "assistant"; content: string; ts: number }>, model: Model<Api>) {
+  return history.map((turn) => {
+    if (turn.role === "user") {
+      return {
+        role: "user" as const,
+        content: turn.content,
+        timestamp: turn.ts,
+      };
+    }
+    return {
+      role: "assistant" as const,
+      content: [{ type: "text" as const, text: turn.content }],
+      api: model.api,
+      provider: model.provider,
+      model: model.id,
+      usage: buildUsage(),
+      stopReason: "stop" as const,
+      timestamp: turn.ts,
+    };
+  });
+}
+
+function toPiTools(toolDefs: ToolDefinition[]) {
+  return toolDefs.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    parameters: tool.parameters as any,
+  }));
+}
+
+function resolveCacheRetention(config: LiteConfig): CacheRetention {
+  if (config.modelRef.startsWith("openai-codex/")) {
+    return "short";
+  }
+  return "none";
+}
+
+async function createModelResponse(params: {
+  model: Model<Api>;
+  authToken: string;
+  transport?: "auto";
+  systemPrompt: string;
+  messages: any[];
+  tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }>;
+  sessionKey: string;
+  config: LiteConfig;
+}): Promise<AssistantMessage> {
+  const { model, authToken, transport, systemPrompt, messages, tools, sessionKey, config } = params;
+  return await completeSimple(
+    model as any,
+    {
+      systemPrompt,
+      messages,
+      tools,
+    } as any,
+    {
+      apiKey: authToken,
+      transport,
+      sessionId: sessionKey,
+      cacheRetention: resolveCacheRetention(config),
+    },
+  );
 }
 
 export function createReplyRuntime(config: LiteConfig) {
-  const { client, modelTarget } = createOpenAIClient(config);
   const tools = createToolRuntime(config);
   const toolDefs: ToolDefinition[] = tools.definitions;
+  const piTools = toPiTools(toolDefs);
   const memory = new ChatMemoryStore();
 
   async function reply(message: string, sessionKey: string): Promise<ReplyResult> {
-    const history = memory.list(sessionKey).map((turn) => ({
-      role: turn.role,
-      content: turn.content,
-    }));
+    const { model, auth, transport } = await resolveModelAuth(config);
+    const history = memory.list(sessionKey);
+    const historyMessages = historyToPiMessages(history, model);
+    const systemPrompt =
+      "You are coke-claw-lite. Keep responses concise and execute tools only when needed. Session: " +
+      sessionKey;
+    const messages: any[] = [
+      ...historyMessages,
+      {
+        role: "user" as const,
+        content: message,
+        timestamp: Date.now(),
+      },
+    ];
 
-    let response = await createResponse(client, {
-      model: modelTarget.model,
-      input: [
-        {
-          role: "system",
-          content:
-            "You are coke-claw-lite. Keep responses concise and execute tools only when needed. Session: " +
-            sessionKey,
-        },
-        ...history,
-        { role: "user", content: message },
-      ],
-      tools: toolDefs,
+    let response = await createModelResponse({
+      model,
+      authToken: auth.token,
+      transport,
+      systemPrompt,
+      messages,
+      tools: piTools,
+      sessionKey,
+      config,
     });
 
     for (let i = 0; i < 8; i += 1) {
-      const calls = extractFunctionCalls(response);
+      const calls = extractToolCalls(response);
       if (calls.length === 0) {
         break;
       }
 
-      const outputs = [];
+      messages.push(response);
       for (const call of calls) {
-        const args = safeParseJson(call.arguments);
         try {
-          const result = await tools.run(call.name, args);
-          outputs.push({
-            type: "function_call_output",
-            call_id: call.callId,
-            output: JSON.stringify(result),
+          const result = await tools.run(call.name, call.arguments);
+          messages.push({
+            role: "toolResult",
+            toolCallId: call.id,
+            toolName: call.name,
+            content: [{ type: "text", text: JSON.stringify(result) }],
+            isError: false,
+            timestamp: Date.now(),
           });
         } catch (error) {
-          outputs.push({
-            type: "function_call_output",
-            call_id: call.callId,
-            output: JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
+          messages.push({
+            role: "toolResult",
+            toolCallId: call.id,
+            toolName: call.name,
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
+              },
+            ],
+            isError: true,
+            timestamp: Date.now(),
           });
         }
       }
 
-      response = await createResponse(client, {
-        model: modelTarget.model,
-        previous_response_id: response.id,
-        input: outputs,
-        tools: toolDefs,
+      response = await createModelResponse({
+        model,
+        authToken: auth.token,
+        transport,
+        systemPrompt,
+        messages,
+        tools: piTools,
+        sessionKey,
+        config,
       });
+    }
+
+    if (response.stopReason === "error" && response.errorMessage) {
+      throw new Error(response.errorMessage);
     }
 
     const text = extractText(response) || "(empty response)";
@@ -140,10 +203,8 @@ export function createReplyRuntime(config: LiteConfig) {
     memory.append(sessionKey, { role: "assistant", content: text });
     const usage = response?.usage
       ? {
-          inputTokens:
-            typeof response.usage.input_tokens === "number" ? response.usage.input_tokens : undefined,
-          outputTokens:
-            typeof response.usage.output_tokens === "number" ? response.usage.output_tokens : undefined,
+          inputTokens: typeof response.usage.input === "number" ? response.usage.input : undefined,
+          outputTokens: typeof response.usage.output === "number" ? response.usage.output : undefined,
         }
       : undefined;
 

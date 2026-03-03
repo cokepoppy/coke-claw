@@ -1,4 +1,5 @@
 import express, { type Request, type Response } from "express";
+import { completeSimple } from "@mariozechner/pi-ai";
 import type { Server } from "node:http";
 import fs from "node:fs";
 import path from "node:path";
@@ -10,7 +11,7 @@ import {
   createCodingAgentCommandRunner,
 } from "../runtime/slash/coding-agent.js";
 import { CodexSessionStore } from "../acp/codex-session-store.js";
-import { inspectOpenAIAuth } from "../auth/openai-client.js";
+import { inspectOpenAIAuth, resolveModelAuth } from "../auth/openai-client.js";
 import { getCodexLoginStatus, startCodexDeviceLogin } from "../auth/codex-login.js";
 
 function resolvePublicRoot(): string {
@@ -34,6 +35,65 @@ type ApiResult =
 
 function sendJson(res: Response, status: number, payload: ApiResult) {
   res.status(status).json(payload);
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function probeModelApis(config: LiteConfig): Promise<{
+  model?: string;
+  provider?: string;
+  authSource?: "env" | "codex-cli";
+  authError?: string;
+  responses: { ok: boolean; error?: string };
+  chatCompletions: { ok: boolean; error?: string };
+}> {
+  try {
+    const { model, modelTarget, auth, transport } = await resolveModelAuth(config);
+    const result = {
+      model: modelTarget.model,
+      provider: modelTarget.provider,
+      authSource: auth.source,
+      responses: { ok: false } as { ok: boolean; error?: string },
+      chatCompletions: { ok: false } as { ok: boolean; error?: string },
+    };
+
+    try {
+      const response = await completeSimple(
+        model as any,
+        {
+          systemPrompt: "You are a connectivity probe. Reply with pong.",
+          messages: [{ role: "user", content: "ping" }],
+        } as any,
+        {
+          apiKey: auth.token,
+          transport,
+          sessionId: "admin:auth-probe",
+        },
+      );
+      if (response.stopReason === "error") {
+        throw new Error(response.errorMessage || "model probe failed");
+      }
+      result.responses = { ok: true };
+    } catch (error) {
+      result.responses = { ok: false, error: formatError(error) };
+    }
+
+    result.chatCompletions = {
+      ok: false,
+      error: "not-used (coke-claw-lite now probes through pi-ai provider transport)",
+    };
+
+    return result;
+  } catch (error) {
+    const authError = formatError(error);
+    return {
+      authError,
+      responses: { ok: false, error: authError },
+      chatCompletions: { ok: false, error: authError },
+    };
+  }
 }
 
 export async function startAdminServer(config: LiteConfig): Promise<{ server: Server; url: string }> {
@@ -92,6 +152,18 @@ export async function startAdminServer(config: LiteConfig): Promise<{ server: Se
       sendJson(res, 500, {
         ok: false,
         error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  app.post("/api/auth/probe", async (_req: Request, res: Response) => {
+    try {
+      const data = await probeModelApis(config);
+      sendJson(res, 200, { ok: true, data });
+    } catch (error) {
+      sendJson(res, 500, {
+        ok: false,
+        error: formatError(error),
       });
     }
   });

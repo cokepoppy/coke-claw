@@ -20,10 +20,10 @@
     "test:e2e:ui": "npm run build && node --test dist/e2e/admin-ui.e2e.test.js"
   },
   "dependencies": {
+    "@mariozechner/pi-ai": "^0.55.4",
     "dotenv": "^16.6.1",
     "express": "^5.1.0",
     "grammy": "^1.38.3",
-    "openai": "^5.22.0",
     "playwright": "^1.55.0",
     "zod": "^3.25.76"
   },

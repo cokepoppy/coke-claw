@@ -5,6 +5,7 @@ const el = {
   refreshBtn: document.getElementById("btn-refresh"),
   authStatusBtn: document.getElementById("btn-auth-status"),
   authLoginBtn: document.getElementById("btn-auth-login"),
+  authProbeBtn: document.getElementById("btn-auth-probe"),
   authOutput: document.getElementById("auth-output"),
   codingForm: document.getElementById("coding-form"),
   codingSession: document.getElementById("coding-session"),
@@ -121,6 +122,28 @@ el.authLoginBtn.addEventListener("click", async () => {
       data.code ? `Code: ${data.code}` : "",
       "After completing browser login, click Auth Status.",
       !data.url || !data.code ? `Raw output:\n${data.text || ""}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    setOutput(el.authOutput, text, false);
+  } catch (error) {
+    setOutput(el.authOutput, error instanceof Error ? error.message : String(error), true);
+  }
+});
+
+el.authProbeBtn.addEventListener("click", async () => {
+  try {
+    setOutput(el.authOutput, "Probing model transport...", false);
+    const data = await api("/api/auth/probe", { method: "POST", body: "{}" });
+    const text = [
+      `Provider: ${data.provider || "unknown"}`,
+      `Model: ${data.model || "unknown"}`,
+      `Auth source: ${data.authSource || "unknown"}`,
+      data.authError ? `Auth init error: ${data.authError}` : "",
+      `model request: ${data.responses?.ok ? "ok" : `error (${data.responses?.error || "unknown"})`}`,
+      `compat check: ${
+        data.chatCompletions?.ok ? "ok" : `error (${data.chatCompletions?.error || "unknown"})`
+      }`,
     ]
       .filter(Boolean)
       .join("\n");

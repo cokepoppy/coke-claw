@@ -3,7 +3,7 @@
 基于 OpenClaw 思路做的精简版实现，目标是保留最核心链路：
 
 - Telegram 单渠道
-- Codex 登录复用（优先）+ OpenAI 兜底
+- Codex 登录复用（`openai-codex`）+ OpenAI API Key（`openai`）
 - `/coding_agent` 调用 codex CLI
 - Mac 文件/浏览器工具
 - 精简控制台
@@ -18,8 +18,8 @@
 1. Telegram 消息收发（含 slash command）
 2. 模型调用：`openai` / `openai-codex`
 3. 认证方式：
-   - 优先读取 Codex 登录态（`codex login`）
-   - 再回退 `OPENAI_API_KEY`
+   - `MODEL_REF=openai-codex/...`：复用 Codex 登录态（`codex login`）
+   - `MODEL_REF=openai/...`：使用 `OPENAI_API_KEY`
 4. Slash 命令：
    - `/help`
    - `/auth status`
