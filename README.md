@@ -6,6 +6,7 @@
 - Codex 登录复用（`openai-codex`）+ OpenAI API Key（`openai`）
 - `/coding_agent` 调用 codex CLI
 - Mac 文件/浏览器工具
+- macOS 终端工具（`mac_run`）
 - 精简控制台
 - 精简管理端（Admin UI）
 
@@ -28,8 +29,15 @@
 5. 管理端 API + Web UI：
    - 健康状态
    - Auth 状态与设备码登录
+   - 模型传输探针（Probe API）
    - coding_agent 运行/重置/会话列表
    - 调试聊天
+
+6. 文件/终端工具（供聊天自动调用）：
+   - `fs_search_files`（搜索文件）
+   - `fs_create_file`（创建文件）
+   - `fs_read_text` / `fs_write_text` / `fs_edit_text`
+   - `mac_run`（在 workspace 内执行终端命令）
 
 ## 快速开始
 
@@ -49,7 +57,7 @@ cp .env.example .env
 
 ```env
 TELEGRAM_BOT_TOKEN=你的telegram机器人token
-WORKSPACE_ROOT=/Users/xxx/your-path/coke-claw
+WORKSPACE_ROOT=~/.cokeclaw
 ```
 
 可选配置：

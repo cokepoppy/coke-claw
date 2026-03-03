@@ -1,6 +1,6 @@
 import { LiteConfig } from "../config.js";
 import { createBrowserTools } from "./browser-tools.js";
-import { fsEditText, fsListFiles, fsReadText, fsWriteText } from "./fs-tools.js";
+import { fsCreateFile, fsEditText, fsListFiles, fsReadText, fsSearchFiles, fsWriteText } from "./fs-tools.js";
 import { runMacCommand } from "./mac-run.js";
 
 export interface ToolDefinition {
@@ -49,6 +49,21 @@ export function createToolRuntime(config: LiteConfig): ToolRuntime {
     },
     {
       type: "function",
+      name: "fs_create_file",
+      description: "Create a new utf-8 text file within workspace",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          content: { type: "string" },
+          overwrite: { type: "boolean" },
+        },
+        required: ["path"],
+        additionalProperties: false,
+      },
+    },
+    {
+      type: "function",
       name: "fs_edit_text",
       description: "Replace text in a file within workspace",
       parameters: {
@@ -70,6 +85,21 @@ export function createToolRuntime(config: LiteConfig): ToolRuntime {
         type: "object",
         properties: { path: { type: "string" } },
         required: ["path"],
+        additionalProperties: false,
+      },
+    },
+    {
+      type: "function",
+      name: "fs_search_files",
+      description: "Search file paths by keyword in workspace",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+          path: { type: "string" },
+          maxResults: { type: "number" },
+        },
+        required: ["query"],
         additionalProperties: false,
       },
     },
@@ -143,6 +173,7 @@ export function createToolRuntime(config: LiteConfig): ToolRuntime {
         properties: {
           command: { type: "string" },
           timeoutMs: { type: "number" },
+          cwd: { type: "string" },
         },
         required: ["command"],
         additionalProperties: false,
@@ -158,6 +189,13 @@ export function createToolRuntime(config: LiteConfig): ToolRuntime {
           return await fsReadText(config.workspaceRoot, String(args.path));
         case "fs_write_text":
           return await fsWriteText(config.workspaceRoot, String(args.path), String(args.content));
+        case "fs_create_file":
+          return await fsCreateFile(
+            config.workspaceRoot,
+            String(args.path),
+            typeof args.content === "string" ? args.content : "",
+            Boolean(args.overwrite),
+          );
         case "fs_edit_text":
           return await fsEditText(
             config.workspaceRoot,
@@ -167,6 +205,13 @@ export function createToolRuntime(config: LiteConfig): ToolRuntime {
           );
         case "fs_list_files":
           return await fsListFiles(config.workspaceRoot, String(args.path));
+        case "fs_search_files":
+          return await fsSearchFiles(
+            config.workspaceRoot,
+            String(args.query),
+            typeof args.path === "string" ? args.path : ".",
+            Number(args.maxResults ?? 50),
+          );
         case "browser_navigate":
           return await browser.navigate(String(args.url));
         case "browser_snapshot":
@@ -181,7 +226,12 @@ export function createToolRuntime(config: LiteConfig): ToolRuntime {
           if (!config.enableMacRun) {
             throw new Error("mac_run disabled by config");
           }
-          return await runMacCommand(String(args.command), Number(args.timeoutMs ?? 20_000));
+          return await runMacCommand(
+            config.workspaceRoot,
+            String(args.command),
+            Number(args.timeoutMs ?? 20_000),
+            typeof args.cwd === "string" ? args.cwd : undefined,
+          );
         }
         default:
           throw new Error(`Unknown tool: ${name}`);

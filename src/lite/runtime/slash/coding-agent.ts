@@ -17,13 +17,15 @@ export interface CodingAgentRunInput {
   forceNew?: boolean;
 }
 
-function assertInsideWorkspace(workspaceRoot: string, rawPath: string): string {
-  const absolute = path.resolve(workspaceRoot, rawPath);
-  const relative = path.relative(workspaceRoot, absolute);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    throw new Error(`cwd escapes workspace: ${rawPath}`);
+function resolveCwd(workspaceRoot: string, rawPath: string): string {
+  const input = rawPath.trim();
+  if (!input || input === ".") {
+    return path.resolve(workspaceRoot);
   }
-  return absolute;
+  if (path.isAbsolute(input)) {
+    return path.resolve(input);
+  }
+  return path.resolve(workspaceRoot, input);
 }
 
 export function parseCodingAgentArgs(input: string): ParsedCodingAgentArgs {
@@ -146,7 +148,7 @@ export function createCodingAgentCommandRunner(workspaceRoot: string): CodingAge
         return "Usage: /coding_agent <task> [--cwd <path>] [--mode persistent|oneshot] [--new]";
       }
 
-      const cwd = assertInsideWorkspace(workspaceRoot, parsed.cwd ?? ".");
+      const cwd = resolveCwd(workspaceRoot, parsed.cwd ?? ".");
       const saved = parsed.forceNew ? null : store.get(sessionKey);
       const resumeThreadId = parsed.mode === "persistent" ? saved?.threadId : undefined;
 
